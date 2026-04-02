@@ -1,4 +1,4 @@
-# fee-split
+# fee_split
 
 Trustless, on-chain revenue splitting for Gno.land.
 
