@@ -1,3 +1,5 @@
+`Gno.land` · `Smart Contracts` · `Infrastructure`
+
 # fee_split
 
 Trustless, on-chain revenue splitting for Gno.land.
@@ -105,5 +107,20 @@ GetClaimable("split_1", "g1alice...")
 ## Render
 
 Visit `/r/fee_split` on a Gno.land node to see all active splits with their configuration and balances.
+
+## Stack
+
+- [Gno](https://gno.land) — Go-like smart contract language
+- [Gno.land](https://gno.land) — Layer 1 blockchain
+
+## Part of the Gno Infrastructure Stack
+
+| Realm | Layer |
+|-------|-------|
+| **fee_split** | **Revenue & value flow** |
+| [permission_registry](https://github.com/SillyZir/permission_registry) | Access control |
+| [service_registry](https://github.com/SillyZir/service_registry) | Discovery |
+| [upgrade_registry](https://github.com/SillyZir/upgrade_registry) | Upgrade tracking |
+| [timelock_guardian](https://github.com/SillyZir/timelock_guardian) | Security |
 
 ---
