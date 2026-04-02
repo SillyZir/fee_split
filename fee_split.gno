@@ -236,15 +236,14 @@ func GetSplitInfo(splitID string) string {
 	s := mustGetSplit(splitID)
 
 	var b strings.Builder
-	b.WriteString(ufmt.Sprintf("Split: %s\n", splitID))
-	b.WriteString(ufmt.Sprintf("Owner: %s\n", string(s.Owner)))
-	b.WriteString(ufmt.Sprintf("Frozen: %s\n", boolStr(s.Frozen)))
-	b.WriteString(ufmt.Sprintf("Total deposited: %d\n", s.TotalDeposited))
-	b.WriteString(ufmt.Sprintf("Total claimed: %d\n", s.TotalClaimed))
+	b.WriteString("Split: " + splitID + "\n")
+	b.WriteString("Owner: " + string(s.Owner) + "\n")
+	b.WriteString("Frozen: " + boolStr(s.Frozen) + "\n")
+	b.WriteString("Total deposited: " + strconv.FormatUint(s.TotalDeposited, 10) + "\n")
+	b.WriteString("Total claimed: " + strconv.FormatUint(s.TotalClaimed, 10) + "\n")
 	b.WriteString("Recipients:\n")
 	for i, r := range s.Recipients {
-		pct := ufmt.Sprintf("%d.%02d%%", s.Shares[i]/100, s.Shares[i]%100)
-		b.WriteString(ufmt.Sprintf("  %s  %s  claimable: %d\n", string(r), pct, s.Balances[r]))
+		b.WriteString("  " + string(r) + "  " + formatPct(s.Shares[i]) + "  claimable: " + strconv.FormatUint(s.Balances[r], 10) + "\n")
 	}
 	return b.String()
 }
@@ -258,23 +257,53 @@ func GetClaimable(splitID string, addr std.Address) uint64 {
 // ---------- render ----------
 
 func Render(path string) string {
-	if len(splits) == 0 {
+	if splits == nil || len(splits) == 0 {
 		return "# Fee Split\n\nNo active splits.\n"
 	}
 
 	var b strings.Builder
 	b.WriteString("# Fee Split\n\n")
 
-	for id := range splits {
-		b.WriteString(ufmt.Sprintf("## %s\n\n", id))
+	for id, s := range splits {
+		b.WriteString("## " + id + "\n\n")
+		if s == nil {
+			b.WriteString("_(invalid split)_\n\n")
+			continue
+		}
 		b.WriteString("```\n")
-		b.WriteString(GetSplitInfo(id))
+		b.WriteString("Owner: " + string(s.Owner) + "\n")
+		b.WriteString("Frozen: " + boolStr(s.Frozen) + "\n")
+		b.WriteString("Total deposited: " + strconv.FormatUint(s.TotalDeposited, 10) + "\n")
+		b.WriteString("Total claimed: " + strconv.FormatUint(s.TotalClaimed, 10) + "\n")
+		if len(s.Recipients) > 0 {
+			b.WriteString("Recipients:\n")
+			for i, r := range s.Recipients {
+				share := "??%"
+				if i < len(s.Shares) {
+					share = formatPct(s.Shares[i])
+				}
+				bal := "0"
+				if s.Balances != nil {
+					bal = strconv.FormatUint(s.Balances[r], 10)
+				}
+				b.WriteString("  " + string(r) + "  " + share + "  claimable: " + bal + "\n")
+			}
+		}
 		b.WriteString("```\n\n")
 	}
 	return b.String()
 }
 
 // ---------- helpers ----------
+
+func formatPct(bp uint64) string {
+	whole := strconv.FormatUint(bp/100, 10)
+	frac := strconv.FormatUint(bp%100, 10)
+	if len(frac) == 1 {
+		frac = "0" + frac
+	}
+	return whole + "." + frac + "%"
+}
 
 func mustGetSplit(id string) *Split {
 	s, ok := splits[id]
