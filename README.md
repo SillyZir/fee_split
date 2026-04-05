@@ -39,8 +39,10 @@ The key design choice: splits are **pull-based** (recipients claim) rather than 
 
 ```
 // 60% to alice, 25% to bob, 15% to carol
+// owner is the address that controls the split
 CreateSplit(
     cross,
+    "g1owner...",
     "g1alice...,g1bob...,g1carol...",
     "6000,2500,1500"
 )
@@ -57,20 +59,20 @@ Deposit(cross, "split_1", 1000000)
 ### Claim your share
 
 ```
-Claim(cross, "split_1")
+Claim(cross, "split_1", "g1alice...")
 // returns: your claimable balance
 ```
 
 ### Update shares (owner only)
 
 ```
-UpdateShares(cross, "split_1", "g1alice...,g1bob...,g1dave...", "5000,3000,2000")
+UpdateShares(cross, "split_1", "g1owner...", "g1alice...,g1bob...,g1dave...", "5000,3000,2000")
 ```
 
 ### Freeze shares permanently
 
 ```
-Freeze(cross, "split_1")
+Freeze(cross, "split_1", "g1owner...")
 // shares can never be changed again
 ```
 
@@ -85,12 +87,12 @@ GetClaimable("split_1", "g1alice...")
 
 | Function | Access | Description |
 |----------|--------|-------------|
-| `CreateSplit(cross, recipients, shares)` | Anyone | Create a new split. Caller becomes owner. |
+| `CreateSplit(cross, owner, recipients, shares)` | Anyone | Create a new split. Provided `owner` string controls it. |
 | `Deposit(cross, splitID, amount)` | Anyone | Distribute funds to recipients. |
-| `Claim(cross, splitID)` | Recipient | Withdraw accumulated balance. |
-| `UpdateShares(cross, splitID, recipients, shares)` | Owner | Change recipients and shares. |
-| `TransferOwnership(cross, splitID, newOwner)` | Owner | Hand off split control. |
-| `Freeze(cross, splitID)` | Owner | Permanently lock shares. |
+| `Claim(cross, splitID, caller)` | Recipient | Withdraw accumulated balance for `caller`. |
+| `UpdateShares(cross, splitID, caller, recipients, shares)` | Owner | Change recipients and shares. `caller` must match owner. |
+| `TransferOwnership(cross, splitID, caller, newOwner)` | Owner | Hand off split control. `caller` must match owner. |
+| `Freeze(cross, splitID, caller)` | Owner | Permanently lock shares. `caller` must match owner. |
 | `GetSplitInfo(splitID)` | Anyone | View split configuration and balances. |
 | `GetClaimable(splitID, addr)` | Anyone | Check claimable balance for an address. |
 | `Render(path)` | Anyone | Markdown overview of all splits. |
@@ -99,12 +101,17 @@ GetClaimable("split_1", "g1alice...")
 
 - **Percentage validation**: shares must sum to exactly 10000 basis points (100%)
 - **Duplicate detection**: rejects duplicate recipients in the same split
-- **Caller authentication**: uses `std.PreviousRealm().Address()` — cannot be spoofed by intermediate contracts
+- **Explicit caller**: owner and caller are passed as plain string parameters — the consuming realm is responsible for passing the correct address (typically derived from `std.PreviousRealm().Address()` in the caller's context)
 - **Rounding protection**: dust from integer division goes to the last recipient
 - **Freeze mechanism**: one-way lock prevents owner from changing shares after trust is established
 - **Balance preservation**: updating shares never destroys unclaimed balances
 
-## Render
+## Query on Gno.land
+
+```
+gnokey query vm/qeval --data 'gno.land/r/fee_split.GetSplitInfo("split_1")' --remote <rpc>
+gnokey query vm/qeval --data 'gno.land/r/fee_split.GetClaimable("split_1", "g1alice...")' --remote <rpc>
+```
 
 Visit `/r/fee_split` on a Gno.land node to see all active splits with their configuration and balances.
 

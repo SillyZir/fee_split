@@ -10,15 +10,17 @@
 
 ```
 type Split struct {
-    Owner          std.Address
-    Recipients     []std.Address
+    Owner          string
+    Recipients     []string
     Shares         []uint64              // basis points, sum = 10000
-    Balances       map[std.Address]uint64
+    Balances       map[string]uint64
     TotalDeposited uint64
     TotalClaimed   uint64
     Frozen         bool
 }
 ```
+
+Note: `Owner`, `Recipients`, and `Balances` keys use plain `string` rather than `std.Address`. The consuming realm is responsible for passing valid address strings.
 
 - **Shares** are in basis points: 1 bp = 0.01%, 10000 bp = 100%.
 - **Balances** track per-recipient claimable amounts.
@@ -39,16 +41,16 @@ Splits are stored in a package-level `map[string]*Split` keyed by auto-increment
 
 ## Authorization
 
-All write operations use `std.PreviousRealm().Address()` to identify the caller. This returns the address of the immediate caller (EOA or calling realm), preventing impersonation through intermediate contract calls.
+Unlike other realms in this stack, `fee_split` uses **explicit caller string parameters** rather than `std.PreviousRealm().Address()` for authorization. The `owner` is stored at creation time and compared against the `caller` string passed to each write operation. The consuming realm is responsible for supplying the correct address.
 
-| Operation | Required caller |
-|-----------|----------------|
-| CreateSplit | Anyone (caller becomes owner) |
-| Deposit | Anyone |
-| Claim | Must be a recipient with balance > 0 |
-| UpdateShares | Must be owner, split must not be frozen |
-| TransferOwnership | Must be owner |
-| Freeze | Must be owner |
+| Operation | Required `caller` |
+|-----------|-------------------|
+| CreateSplit | Anyone — provided `owner` string is stored as controller |
+| Deposit | Anyone — no ownership check |
+| Claim | `caller` must be a recipient with balance > 0 |
+| UpdateShares | `caller` must equal stored owner; split must not be frozen |
+| TransferOwnership | `caller` must equal stored owner |
+| Freeze | `caller` must equal stored owner |
 
 ## Rounding
 
@@ -72,8 +74,8 @@ Integer division of `(amount * share) / 10000` can lose fractional units. The la
 
 ```
 1. Validate split exists
-2. Validate caller is a recipient
-3. Validate balance > 0
+2. Validate caller string is a registered recipient
+3. Validate balance[caller] > 0
 4. Set balance[caller] = 0
 5. Increment TotalClaimed
 6. Return claimed amount
