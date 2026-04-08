@@ -16,6 +16,7 @@ type Split struct {
 	TotalDeposited uint64
 	TotalClaimed   uint64
 	Frozen         bool
+	Archived       bool
 }
 
 const (
@@ -57,6 +58,14 @@ func mustGetSplit(id string) *Split {
 	s, ok := splits[id]
 	if !ok {
 		panic("split not found: " + id)
+	}
+	return s
+}
+
+func mustGetActive(id string) *Split {
+	s := mustGetSplit(id)
+	if s.Archived {
+		panic("split is archived: " + id)
 	}
 	return s
 }
@@ -157,7 +166,7 @@ func CreateSplit(_ realm, recipientList, shareList string) string {
 // Rounding dust goes to the highest-share recipient (deterministic,
 // not order-dependent).
 func Deposit(_ realm, splitID string, amount uint64) {
-	s := mustGetSplit(splitID)
+	s := mustGetActive(splitID)
 	if s.Frozen {
 		panic("split is frozen")
 	}
@@ -191,7 +200,7 @@ func Deposit(_ realm, splitID string, amount uint64) {
 
 // Claim withdraws the caller's accumulated balance.
 func Claim(_ realm, splitID string) uint64 {
-	s := mustGetSplit(splitID)
+	s := mustGetActive(splitID)
 	addr := caller()
 
 	bal, exists := s.Balances[addr]
@@ -209,7 +218,7 @@ func Claim(_ realm, splitID string) uint64 {
 
 // UpdateShares replaces recipients and shares. Owner only. Not if frozen.
 func UpdateShares(_ realm, splitID, recipientList, shareList string) {
-	s := mustGetSplit(splitID)
+	s := mustGetActive(splitID)
 	if caller() != s.Owner {
 		panic("only the owner can update shares")
 	}
@@ -247,7 +256,7 @@ func UpdateShares(_ realm, splitID, recipientList, shareList string) {
 
 // TransferOwnership hands control to a new owner.
 func TransferOwnership(_ realm, splitID, newOwner string) {
-	s := mustGetSplit(splitID)
+	s := mustGetActive(splitID)
 	if caller() != s.Owner {
 		panic("only the owner can transfer ownership")
 	}
@@ -259,11 +268,43 @@ func TransferOwnership(_ realm, splitID, newOwner string) {
 
 // Freeze permanently locks shares. One-way, cannot be undone.
 func Freeze(_ realm, splitID string) {
-	s := mustGetSplit(splitID)
+	s := mustGetActive(splitID)
 	if caller() != s.Owner {
 		panic("only the owner can freeze")
 	}
 	s.Frozen = true
+}
+
+// Archive marks a fully-claimed split as archived. Only the owner can
+// archive, and only if all balances are zero. Archived splits are excluded
+// from Render and block all further interaction. Cannot be undone.
+func Archive(_ realm, splitID string) {
+	s := mustGetActive(splitID)
+	if caller() != s.Owner {
+		panic("only the owner can archive")
+	}
+
+	for _, r := range s.Recipients {
+		if s.Balances[r] > 0 {
+			panic("cannot archive: outstanding balance for " + r)
+		}
+	}
+
+	s.Archived = true
+
+	// Free the owner's slot so they can create new splits
+	ownerSplits[s.Owner]--
+	if ownerSplits[s.Owner] <= 0 {
+		delete(ownerSplits, s.Owner)
+	}
+
+	// Remove from active ID list (keeps map entry for audit)
+	for i, id := range splitIDs {
+		if id == splitID {
+			splitIDs = append(splitIDs[:i], splitIDs[i+1:]...)
+			break
+		}
+	}
 }
 
 // ---------- read-only queries ----------
