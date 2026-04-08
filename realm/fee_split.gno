@@ -1,6 +1,7 @@
 package fee_split
 
 import (
+	"std"
 	"strconv"
 	"strings"
 )
@@ -18,13 +19,19 @@ type Split struct {
 }
 
 var (
-	splits map[string]*Split
-	nextID int
+	splits   map[string]*Split
+	splitIDs []string // insertion-ordered for deterministic Render
+	nextID   int
 )
 
 func init() {
 	splits = make(map[string]*Split)
+	splitIDs = []string{}
 	nextID = 1
+}
+
+func caller() string {
+	return string(std.PreviousRealm().Address())
 }
 
 // ---------- helpers ----------
@@ -86,10 +93,10 @@ func parseAddresses(raw string) []string {
 
 // ---------- write operations ----------
 
-// CreateSplit registers a new split. The caller-provided owner address
-// controls future updates. Recipients and shares are comma-separated;
-// shares are in basis points summing to 10000.
-func CreateSplit(_ realm, owner, recipientList, shareList string) string {
+// CreateSplit registers a new split. The caller becomes the owner.
+// Recipients and shares are comma-separated; shares are in basis points
+// summing to 10000.
+func CreateSplit(_ realm, recipientList, shareList string) string {
 	recipients := parseAddresses(recipientList)
 	shares := parseBasisPoints(shareList)
 
@@ -117,11 +124,12 @@ func CreateSplit(_ realm, owner, recipientList, shareList string) string {
 	}
 
 	splits[id] = &Split{
-		Owner:      owner,
+		Owner:      caller(),
 		Recipients: recipients,
 		Shares:     shares,
 		Balances:   balances,
 	}
+	splitIDs = append(splitIDs, id)
 	return id
 }
 
@@ -153,10 +161,11 @@ func Deposit(_ realm, splitID string, amount uint64) {
 }
 
 // Claim withdraws the caller's accumulated balance.
-func Claim(_ realm, splitID, caller string) uint64 {
+func Claim(_ realm, splitID string) uint64 {
 	s := mustGetSplit(splitID)
+	addr := caller()
 
-	bal, exists := s.Balances[caller]
+	bal, exists := s.Balances[addr]
 	if !exists {
 		panic("not a recipient of this split")
 	}
@@ -164,15 +173,15 @@ func Claim(_ realm, splitID, caller string) uint64 {
 		panic("nothing to claim")
 	}
 
-	s.Balances[caller] = 0
+	s.Balances[addr] = 0
 	s.TotalClaimed += bal
 	return bal
 }
 
 // UpdateShares replaces recipients and shares. Owner only. Not if frozen.
-func UpdateShares(_ realm, splitID, caller, recipientList, shareList string) {
+func UpdateShares(_ realm, splitID, recipientList, shareList string) {
 	s := mustGetSplit(splitID)
-	if caller != s.Owner {
+	if caller() != s.Owner {
 		panic("only the owner can update shares")
 	}
 	if s.Frozen {
@@ -205,9 +214,9 @@ func UpdateShares(_ realm, splitID, caller, recipientList, shareList string) {
 }
 
 // TransferOwnership hands control to a new owner.
-func TransferOwnership(_ realm, splitID, caller, newOwner string) {
+func TransferOwnership(_ realm, splitID, newOwner string) {
 	s := mustGetSplit(splitID)
-	if caller != s.Owner {
+	if caller() != s.Owner {
 		panic("only the owner can transfer ownership")
 	}
 	if newOwner == "" {
@@ -217,9 +226,9 @@ func TransferOwnership(_ realm, splitID, caller, newOwner string) {
 }
 
 // Freeze permanently locks shares. One-way, cannot be undone.
-func Freeze(_ realm, splitID, caller string) {
+func Freeze(_ realm, splitID string) {
 	s := mustGetSplit(splitID)
-	if caller != s.Owner {
+	if caller() != s.Owner {
 		panic("only the owner can freeze")
 	}
 	s.Frozen = true
@@ -261,7 +270,8 @@ func Render(path string) string {
 	var b strings.Builder
 	b.WriteString("# Fee Split\n\n")
 
-	for id, s := range splits {
+	for _, id := range splitIDs {
+		s := splits[id]
 		b.WriteString("## " + id + "\n\n")
 		if s == nil {
 			b.WriteString("_(invalid)_\n\n")
