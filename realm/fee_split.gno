@@ -18,15 +18,23 @@ type Split struct {
 	Frozen         bool
 }
 
+const (
+	MaxRecipients    = 20
+	MaxSplitsPerOwner = 10
+	MaxSplitsGlobal  = 500
+)
+
 var (
-	splits   map[string]*Split
-	splitIDs []string // insertion-ordered for deterministic Render
-	nextID   int
+	splits      map[string]*Split
+	splitIDs    []string // insertion-ordered for deterministic Render
+	ownerSplits map[string]int
+	nextID      int
 )
 
 func init() {
 	splits = make(map[string]*Split)
 	splitIDs = []string{}
+	ownerSplits = make(map[string]int)
 	nextID = 1
 }
 
@@ -97,6 +105,14 @@ func parseAddresses(raw string) []string {
 // Recipients and shares are comma-separated; shares are in basis points
 // summing to 10000.
 func CreateSplit(_ realm, recipientList, shareList string) string {
+	if len(splits) >= MaxSplitsGlobal {
+		panic("global split limit reached")
+	}
+	owner := caller()
+	if ownerSplits[owner] >= MaxSplitsPerOwner {
+		panic("per-owner split limit reached")
+	}
+
 	recipients := parseAddresses(recipientList)
 	shares := parseBasisPoints(shareList)
 
@@ -105,6 +121,9 @@ func CreateSplit(_ realm, recipientList, shareList string) string {
 	}
 	if len(recipients) == 0 {
 		panic("at least one recipient is required")
+	}
+	if len(recipients) > MaxRecipients {
+		panic("too many recipients (max " + strconv.Itoa(MaxRecipients) + ")")
 	}
 
 	seen := make(map[string]bool)
@@ -124,17 +143,19 @@ func CreateSplit(_ realm, recipientList, shareList string) string {
 	}
 
 	splits[id] = &Split{
-		Owner:      caller(),
+		Owner:      owner,
 		Recipients: recipients,
 		Shares:     shares,
 		Balances:   balances,
 	}
 	splitIDs = append(splitIDs, id)
+	ownerSplits[owner]++
 	return id
 }
 
 // Deposit distributes amount across recipients proportionally.
-// Rounding dust goes to the last recipient.
+// Rounding dust goes to the highest-share recipient (deterministic,
+// not order-dependent).
 func Deposit(_ realm, splitID string, amount uint64) {
 	s := mustGetSplit(splitID)
 	if s.Frozen {
@@ -146,17 +167,25 @@ func Deposit(_ realm, splitID string, amount uint64) {
 
 	s.TotalDeposited += amount
 
-	var distributed uint64
-	last := len(s.Recipients) - 1
-	for i, r := range s.Recipients {
-		var share uint64
-		if i == last {
-			share = amount - distributed
-		} else {
-			share = (amount * s.Shares[i]) / 10000
+	// Find the highest-share recipient for dust assignment
+	dustIdx := 0
+	for i := 1; i < len(s.Shares); i++ {
+		if s.Shares[i] > s.Shares[dustIdx] {
+			dustIdx = i
 		}
+	}
+
+	var distributed uint64
+	for i, r := range s.Recipients {
+		share := (amount * s.Shares[i]) / 10000
 		s.Balances[r] += share
 		distributed += share
+	}
+
+	// Assign dust to highest-share recipient
+	dust := amount - distributed
+	if dust > 0 {
+		s.Balances[s.Recipients[dustIdx]] += dust
 	}
 }
 
@@ -193,6 +222,9 @@ func UpdateShares(_ realm, splitID, recipientList, shareList string) {
 
 	if len(recipients) != len(shares) {
 		panic("recipients and shares must have the same length")
+	}
+	if len(recipients) > MaxRecipients {
+		panic("too many recipients (max " + strconv.Itoa(MaxRecipients) + ")")
 	}
 
 	seen := make(map[string]bool)
